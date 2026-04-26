@@ -11,8 +11,7 @@
     "axios": "^1.15.2",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "vite": "^8.0.10"
+    "express": "^4.21.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

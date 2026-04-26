@@ -2,20 +2,49 @@ import express from "express";
 import cors from "cors";
 import axios from "axios";
 import path from "path";
+import fs from "node:fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
 const PORT = 3000;
 
 // In-memory status storage (In production, use a DB)
-const payments: Record<string, { status: "pending" | "success" | "failed"; details?: any }> = {};
+interface PaymentRecord {
+  id: string; // CheckoutRequestID
+  status: "pending" | "success" | "failed";
+  amount: number;
+  phone: string;
+  timestamp: string;
+  mpesaReceiptNumber?: string;
+  resultDesc?: string;
+  details?: any;
+}
+
+const DB_PATH = path.join(__dirname, "payments.json");
+let payments: Record<string, PaymentRecord> = {};
+if (fs.existsSync(DB_PATH)) {
+  try {
+    payments = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
+  } catch (e) {
+    console.error("Failed to load payments DB:", e);
+    payments = {};
+  }
+}
+
+function saveToDb() {
+  try {
+    fs.writeFileSync(DB_PATH, JSON.stringify(payments, null, 2));
+  } catch (e) {
+    console.error("Failed to save payments DB:", e);
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -103,8 +132,15 @@ app.post("/api/payments/stkpush", async (req, res) => {
 
     const checkoutRequestID = stkResponse.data.CheckoutRequestID;
     
-    // Store in memory
-    payments[checkoutRequestID] = { status: "pending" };
+    // Store with full details
+    payments[checkoutRequestID] = { 
+      id: checkoutRequestID,
+      status: "pending",
+      amount: Number(amount),
+      phone: formattedPhone,
+      timestamp: new Date().toISOString()
+    };
+    saveToDb();
 
     res.json({ checkoutRequestID });
   } catch (error: any) {
@@ -114,24 +150,47 @@ app.post("/api/payments/stkpush", async (req, res) => {
   }
 });
 
+// Endpoint: Get payment history
+app.get("/api/payments/history", (req, res) => {
+  const history = Object.values(payments).sort((a, b) => 
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+  res.json(history);
+});
+
 // Endpoint: M-Pesa Callback
 app.post("/api/payments/callback", (req, res) => {
   console.log("M-Pesa Callback received:", JSON.stringify(req.body, null, 2));
 
   const { Body } = req.body;
   if (!Body || !Body.stkCallback) {
+     console.error("Invalid callback payload received");
      res.status(400).send("Invalid callback data");
      return;
   }
 
-  const { CheckoutRequestID, ResultCode, ResultDesc } = Body.stkCallback;
+  const { CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata } = Body.stkCallback;
 
   if (payments[CheckoutRequestID]) {
     payments[CheckoutRequestID].status = ResultCode === 0 ? "success" : "failed";
+    payments[CheckoutRequestID].resultDesc = ResultDesc;
     payments[CheckoutRequestID].details = Body.stkCallback;
+
+    // Extract M-Pesa Receipt Number if successful
+    if (ResultCode === 0 && CallbackMetadata && CallbackMetadata.Item) {
+      const receiptItem = CallbackMetadata.Item.find((item: any) => item.Name === "MpesaReceiptNumber");
+      if (receiptItem) {
+        payments[CheckoutRequestID].mpesaReceiptNumber = receiptItem.Value;
+      }
+    }
+    
+    console.log(`Payment Updated: ${CheckoutRequestID} -> ${payments[CheckoutRequestID].status}`);
+    saveToDb();
+  } else {
+    console.warn(`Received callback for unknown CheckoutRequestID: ${CheckoutRequestID}`);
   }
 
-  res.send("Callback received");
+  res.send({ ResultCode: 0, ResultDesc: "Success" });
 });
 
 // Endpoint: Get status
@@ -144,7 +203,7 @@ app.get("/api/payments/status/:id", (req, res) => {
      return;
   }
 
-  res.json({ status: payment.status });
+  res.json(payment);
 });
 
 // Vite middleware for development

@@ -51,9 +51,32 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [checkoutRequestID, setCheckoutRequestID] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<typeof PRODUCTS[0] | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
 
   // Use the API URL from env or default to current origin
   const API_URL = (import.meta as any).env?.VITE_API_URL || "";
+
+  const fetchHistory = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/payments/history`);
+      setHistory(response.data);
+    } catch (err) {
+      console.error("Failed to fetch history:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const filteredHistory = history.filter(record => 
+    record.phone.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    record.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    record.amount.toString().includes(searchTerm) ||
+    (record.mpesaReceiptNumber && record.mpesaReceiptNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,6 +91,7 @@ export default function App() {
 
       setCheckoutRequestID(response.data.checkoutRequestID);
       setStatus("pending");
+      fetchHistory(); // Refresh to show pending status
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.error || "Failed to initiate payment");
@@ -90,9 +114,11 @@ export default function App() {
           const response = await axios.get(`${API_URL}/api/payments/status/${checkoutRequestID}`);
           if (response.data.status === "success") {
             setStatus("success");
+            fetchHistory(); // Refresh to show success
             clearInterval(interval);
           } else if (response.data.status === "failed") {
             setStatus("failed");
+            fetchHistory(); // Refresh to show failure
             clearInterval(interval);
           }
         } catch (err) {
@@ -360,6 +386,178 @@ export default function App() {
                 </AnimatePresence>
               </motion.div>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* History Section */}
+        {history.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-24 max-w-4xl mx-auto space-y-8"
+          >
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">Recent Activity</h2>
+                <p className="text-sm text-gray-500 font-medium">Your latest M-Pesa transactions.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <input 
+                  type="text" 
+                  placeholder="Search history..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm outline-none focus:border-black transition-all shadow-sm w-full md:w-64"
+                />
+                <button 
+                  onClick={fetchHistory}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-all text-gray-400 hover:text-black"
+                  title="Refresh History"
+                >
+                  <Loader2 size={20} className={status === "pending" ? "animate-spin" : ""} />
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-gray-50 text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-50/50">
+                      <th className="px-6 py-4">Transaction Details</th>
+                      <th className="px-6 py-4">Date</th>
+                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {filteredHistory.map((record: any) => (
+                      <tr 
+                        key={record.id} 
+                        onClick={() => setSelectedRecord(record)}
+                        className="group hover:bg-gray-50 transition-colors cursor-pointer"
+                      >
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${
+                              record.status === 'success' ? 'bg-green-50 text-green-600' : 
+                              record.status === 'failed' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
+                            }`}>
+                              <CreditCard size={16} />
+                            </div>
+                            <div>
+                              <div className="font-bold text-sm">{record.phone}</div>
+                              <div className="text-[10px] text-gray-400 font-mono">
+                                {record.mpesaReceiptNumber || `${record.id.substring(0, 12)}...`}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-xs font-medium text-gray-500">
+                          {new Date(record.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            record.status === 'success' ? 'bg-green-100 text-green-700' : 
+                            record.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700 animate-pulse'
+                          }`}>
+                            {record.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right font-black text-sm">
+                          KES {record.amount}
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredHistory.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-400 font-medium">
+                          No transactions found matching your search.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Detail Modal */}
+        <AnimatePresence>
+          {selectedRecord && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setSelectedRecord(null)}
+                className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="relative w-full max-w-lg bg-white rounded-[32px] p-8 shadow-2xl space-y-6"
+              >
+                <div className="flex items-center justify-between">
+                  <div className={`p-4 rounded-2xl ${
+                    selectedRecord.status === 'success' ? 'bg-green-50 text-green-600' : 
+                    selectedRecord.status === 'failed' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
+                  }`}>
+                    <CreditCard size={32} />
+                  </div>
+                  <button 
+                    onClick={() => setSelectedRecord(null)}
+                    className="p-2 hover:bg-gray-100 rounded-full transition-all"
+                  >
+                    <XCircle size={24} className="text-gray-300" />
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <h3 className="text-3xl font-black tracking-tight">KES {selectedRecord.amount}</h3>
+                  <p className="text-sm text-gray-400 font-medium">Transaction to {selectedRecord.phone}</p>
+                </div>
+
+                <div className="pt-6 border-t border-gray-50 space-y-4">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Reference</span>
+                    <span className="font-mono text-gray-600">{selectedRecord.id}</span>
+                  </div>
+                  {selectedRecord.mpesaReceiptNumber && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">M-Pesa Receipt</span>
+                      <span className="font-bold">{selectedRecord.mpesaReceiptNumber}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Status</span>
+                    <span className={`font-bold uppercase tracking-widest text-[10px] ${
+                      selectedRecord.status === 'success' ? 'text-green-600' : 
+                      selectedRecord.status === 'failed' ? 'text-red-500' : 'text-blue-500'
+                    }`}>{selectedRecord.status}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-400 font-bold uppercase tracking-widest text-[10px]">Timestamp</span>
+                    <span className="font-medium text-gray-600">{new Date(selectedRecord.timestamp).toLocaleString()}</span>
+                  </div>
+                  {selectedRecord.resultDesc && (
+                    <div className="pt-4 p-4 bg-gray-50 rounded-2xl">
+                      <span className="text-gray-400 font-bold uppercase tracking-widest text-[8px] block mb-1">M-Pesa Description</span>
+                      <p className="text-sm text-gray-600 font-medium leading-relaxed">{selectedRecord.resultDesc}</p>
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={() => setSelectedRecord(null)}
+                  className="w-full py-4 bg-black text-white font-bold rounded-2xl hover:bg-gray-800 transition-all"
+                >
+                  Close Details
+                </button>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
       </main>
