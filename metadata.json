@@ -1,0 +1,6 @@
+{
+  "name": "M-Pesa Payment Gateway",
+  "description": "A demo application integrating M-Pesa STK Push with a Node.js backend and React frontend.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
